@@ -1,13 +1,16 @@
-// ignore_for_file: library_private_types_in_public_api, file_names, unused_local_variable
+// ignore_for_file: library_private_types_in_public_api, file_names, unused_local_variable, depend_on_referenced_packages, use_build_context_synchronously
 
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:permission_handler/permission_handler.dart';
 import './models/Patient.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+
+import 'Controllers/patientSearch.dart';
 
 class HarmeClinicManagementSystem extends StatefulWidget {
   const HarmeClinicManagementSystem({Key? key}) : super(key: key);
@@ -31,25 +34,15 @@ class _HarmeClinicManagementSystemState
   }
 
   void onSearchTextChanged(String query) {
-    setState(() {
-      if (query.isNotEmpty) {
-        _filteredList = _allPatients
-            .where((patient) =>
-                patient.name
-                    .toString()
-                    .toLowerCase()
-                    .contains(query.toLowerCase()) ||
-                patient.patientId
-                    .toString()
-                    .toLowerCase()
-                    .contains(query.toLowerCase()))
-            .toList();
-        print(
-            'Search results: ${_filteredList.map((patient) => patient.name).toList()}');
-      } else {
-        _filteredList = _allPatients;
-      }
-    });
+    PatientSearch.onSearchTextChanged(
+      _allPatients,
+      query,
+      (filteredList) {
+        setState(() {
+          _filteredList = filteredList;
+        });
+      },
+    );
   }
 
   @override
@@ -71,7 +64,7 @@ class _HarmeClinicManagementSystemState
               controller: _searchController,
               onChanged: onSearchTextChanged,
               decoration: InputDecoration(
-                hintText: 'Search by Name or Patient ID',
+                hintText: 'Search by   * Name * Phone * Patient ID',
                 hintStyle: const TextStyle(
                   fontSize: 20.0,
                   color: Color.fromRGBO(13, 37, 87, 0.8),
@@ -205,10 +198,10 @@ class _HarmeClinicManagementSystemState
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: FloatingActionButton(
                 backgroundColor: const Color.fromRGBO(13, 37, 87, 0.8),
-                onPressed: () => _savePatientsCopyToLocal(),
+                onPressed: () => _savePatientsCopyToLocal(context),
                 heroTag: "fab1",
                 child: const Icon(
-                  Icons.download,
+                  Icons.settings_backup_restore_rounded,
                   size: 38.0,
                 ),
               ),
@@ -533,33 +526,55 @@ class _HarmeClinicManagementSystemState
     }
   }
 
-  Future<void> _savePatientsCopyToLocal() async {
+  Future<void> _savePatientsCopyToLocal(BuildContext context) async {
     try {
       // Ask user for the file name
       String? fileName = await _getFileNameFromUser();
       if (fileName != null && fileName.isNotEmpty) {
-        // Get the application documents directory
-        Directory directory = await getApplicationDocumentsDirectory();
+        // Get the directory where the user wants to save the file
+        Directory? directory;
+        if (await Permission.manageExternalStorage.request().isGranted) {
+          // If the app has permission to access external storage, use SAF to let the user choose a directory
+          final result = await FilePicker.platform.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: [''],
+            allowMultiple: false,
+          );
 
-        // Create the file path by joining the directory path and file name
-        String filePath = p.join(directory.path, '$fileName.json');
-
-        // Check if file with same name already exists
-        if (await File(filePath).exists()) {
-          if (kDebugMode) {
-            print('File already exists, copy operation cancelled');
+          if (result != null && result.files.isNotEmpty) {
+            final path = result.files.single.path;
+            if (path != null) {
+              directory = Directory(path);
+            }
           }
         } else {
-          // Read the contents of the patient file
-          String contents =
-              await _getLocalFile().then((file) => file.readAsString());
-          List<dynamic> patients = json.decode(contents);
+          // If the app doesn't have permission to access external storage, show an error message
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Permission to access storage denied.'),
+          ));
+        }
 
-          // Create a new file and write the contents to it
-          await File(filePath).writeAsString(json.encode(patients));
+        if (directory != null) {
+          // Create the file path by joining the directory path and file name
+          String filePath = p.join(directory.path, '$fileName.json');
 
-          if (kDebugMode) {
-            print('Patients copied successfully to $filePath');
+          // Check if file with same name already exists
+          if (await File(filePath).exists()) {
+            if (kDebugMode) {
+              print('File already exists, copy operation cancelled');
+            }
+          } else {
+            // Read the contents of the patient file
+            String contents =
+                await _getLocalFile().then((file) => file.readAsString());
+            List<dynamic> patients = json.decode(contents);
+
+            // Create a new file and write the contents to it
+            await File(filePath).writeAsString(json.encode(patients));
+
+            if (kDebugMode) {
+              print('Patients copied successfully to $filePath');
+            }
           }
         }
       } else {
@@ -580,19 +595,19 @@ class _HarmeClinicManagementSystemState
       builder: (BuildContext context) {
         TextEditingController controller = TextEditingController();
         return AlertDialog(
-          title: Text("Save JSON file as..."),
+          title: const Text("Save JSON file as..."),
           content: TextField(
             controller: controller,
             autofocus: true,
-            decoration: InputDecoration(hintText: "File name"),
+            decoration: const InputDecoration(hintText: "File name"),
           ),
           actions: <Widget>[
             TextButton(
-              child: Text("Cancel"),
+              child: const Text("Cancel"),
               onPressed: () => Navigator.of(context).pop(),
             ),
             TextButton(
-              child: Text("Save"),
+              child: const Text("Save"),
               onPressed: () =>
                   Navigator.of(context).pop(controller.text.trim()),
             ),
